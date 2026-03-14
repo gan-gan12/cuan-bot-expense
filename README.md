@@ -162,6 +162,23 @@ Command `/grafik` akan:
 - membuat doughnut chart melalui QuickChart,
 - mengirim hasilnya sebagai file PNG ke Telegram.
 
+## Setup Supabase PostgreSQL (Cloud Database)
+Karena deployment Vercel bersifat *serverless* dan tidak mendukung file SQLite lokal, sangat disarankan menggunakan Supabase:
+
+1. Buat project gratis di [Supabase.com](https://supabase.com).
+2. Buka dashboard project, masuk ke menu **Project Settings** > **Database**.
+3. Gulir ke bagian **Connection string**, pilih tab **URI**.
+4. Salin URI yang diberikan. Pastikan menggunakan **port 6543** (connection pooling) agar aman dari connection limit di Vercel.
+5. Ganti teks `[YOUR-PASSWORD]` dengan password database Anda.
+6. Tambahkan parameter `?sslmode=require` di bagian paling akhir URL.
+
+Contoh format `DATABASE_URL` yang benar:
+```text
+postgresql://postgres.namaproject:PasswordRahasia123@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?sslmode=require
+```
+
+Gunakan URL tersebut untuk dipasang di `.env` lokal atau di Environment Variables Vercel.
+
 ## Deploy ke Vercel
 1. Push repo ke GitHub.
 2. Import project ke Vercel.
