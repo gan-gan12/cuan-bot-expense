@@ -1,3 +1,11 @@
+title: Cuan Bot Expense
+emoji: 💰
+colorFrom: green
+colorTo: blue
+sdk: docker
+pinned: false
+---
+
 # CuanBot Telegram (Serverless / Containers)
 
 CuanBot adalah chatbot Telegram untuk mencatat pengeluaran, budgeting, split bill, scan struk dengan Florence-2, dan mengirim grafik pengeluaran bulanan sebagai file gambar.
