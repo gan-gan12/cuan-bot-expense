@@ -13,7 +13,7 @@ CuanBot adalah chatbot Telegram untuk mencatat pengeluaran, budgeting, split bil
 
 ## Arsitektur Baru
 - Runtime: FastAPI + webhook Telegram.
-- Deployment: Back4App Containers (Docker) atau Vercel Serverless Function.
+- Deployment: Hugging Face Spaces (Docker) atau Vercel Serverless Function.
 - Database: PostgreSQL dengan `psycopg_pool`.
 - OCR struk: Florence-2 (`microsoft/Florence-2-base`) melalui endpoint Hugging Face eksternal.
 - Chart: QuickChart API.
@@ -40,7 +40,7 @@ CuanBot adalah chatbot Telegram untuk mencatat pengeluaran, budgeting, split bil
 ```
 
 ## Environment Variables
-Isi `.env` lokal, Back4App Environment Variables, atau Vercel Settings dengan:
+Isi `.env` lokal, Hugging Face Spaces Secrets, atau Vercel Settings dengan:
 
 ```env
 DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require
@@ -48,7 +48,7 @@ BOT_TIMEZONE=Asia/Jakarta
 TELEGRAM_BOT_TOKEN=ISI_DARI_BOTFATHER
 TELEGRAM_WEBHOOK_SECRET=secret-telegram-webhook
 WEBHOOK_SETUP_SECRET=secret-untuk-setup-webhook
-PUBLIC_BASE_URL=https://nama-project.b4a.run
+PUBLIC_BASE_URL=https://huggingface.co/spaces/username/namaspace
 FLORENCE_ENDPOINT_URL=https://endpoint-anda.huggingface.cloud
 HUGGINGFACE_API_TOKEN=hf_xxx
 FLORENCE_MODEL_ID=microsoft/Florence-2-base
@@ -119,7 +119,7 @@ curl -X POST https://nama-project.vercel.app/telegram/setup-webhook ^
 Webhook akan diarahkan ke:
 
 ```text
-https://nama-project.b4a.run/telegram/webhook
+https://huggingface.co/spaces/username/namaspace/telegram/webhook
 ```
 
 Jika `TELEGRAM_WEBHOOK_SECRET` terisi, Telegram harus mengirim header `X-Telegram-Bot-Api-Secret-Token` yang cocok.
@@ -189,23 +189,26 @@ postgresql://postgres.namaproject:PasswordRahasia123@aws-0-ap-southeast-1.pooler
 
 Gunakan URL tersebut untuk dipasang di `.env` lokal atau di Environment Variables konfigurasi server.
 
-## Deploy ke Back4App Containers
-Back4App menyediakan gratis 1 Container yang dapat berjalan 24/7.
-1. Push repo ke GitHub (pastikan `Dockerfile` sudah ikut ter-push).
-2. Buat App baru di Back4App pilih jenis **Containers**.
-3. Hubungkan akun GitHub Anda dan pilih repository `cuan-bot-expense`.
-4. Isi **Environment Variables** di layar konfigurasi Back4App sesuai yang ada di `.env`. **Ingat untuk mengisi `PUBLIC_BASE_URL` dengan URL `b4a.run` Anda.** (Anda bisa set sementara `https://dummy.b4a.run`, deploy, lalu setelah dapat URL aslinya kemari dan update variabelnya).
-5. Klik **Deploy**.
-6. Ambil URL akhir web Anda (misal `https://namaproject-random.b4a.run`) dan pastikan `PUBLIC_BASE_URL` di Environment Variables sudah sesuai URL tersebut. Restart/Redeploy container jika Anda mengubah variabelnya.
+## Deploy ke Hugging Face Spaces (Docker)
+
+> [!WARNING]  
+> **LIMITASI FREE TIER**: Hugging Face Spaces versi *Free Tier* (Hardware: CPU Basic - Free) **MEMBLOKIR** koneksi *outbound* internet ke luar, termasuk koneksi ke `api.telegram.org` dan database Eksternal Supabase. Inilah penyebab munculnya error `[Errno -5] No address associated with hostname`. 
+> 
+> Agar bot dapat membalas pesan ke Telegram dan menghubungi Supabase, Anda **WAJIB** meningkatkan/upgrade spesifikasi *Hardware* Space Anda minimal ke spesifikasi berbayar terendah (misal: CPU Upgrade). Hal ini otomatis akan membuka akses internet *outbound*.
+
+1. Buat Space baru di Hugging Face, pilih SDK **Docker** (Blank).
+2. Push repository ini (termasuk `Dockerfile`) ke repositori Hugging Face yang baru Anda buat, atau gunakan GitHub Actions `sync_to_huggingface.yml`.
+3. Buka tab **Settings** di Halaman Space Anda.
+4. Di bagian **Variables and secrets**, tekan **New secret** lalu masukkan semua *Environment Variables* di atas satu per satu (seperti `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, dsb).
+5. Pada rahasia `PUBLIC_BASE_URL`, isi URL publik app Anda (misal `https://namasamaran-cuanbot.hf.space` -  Anda dapat melihat public url ini dengan mengeklik *Embed this Space* di kanan atas (Pilih Direct URL)).
+6. Hugging Face akan membangun ulang kontainernya secara otomatis.
 7. Panggil endpoint setup webhook dari terminal Anda:
 
 ```bash
-curl -X POST https://namaproject-random.b4a.run/telegram/setup-webhook ^
+curl -X POST https://namasamaran-cuanbot.hf.space/telegram/setup-webhook ^
   -H "X-Setup-Secret: WEBHOOK_SETUP_SECRET_ANDA"
 ```
 
 ## Catatan Infrastruktur
-- Back4App Containers akan menjalankan bot melalui image Docker (sudah diatur di `Dockerfile`).
-- Vercel serverless tidak cocok untuk SQLite persisten, jadi database dipindah ke Postgres (Supabase).
-- Pooling dipakai melalui `psycopg_pool` agar koneksi lebih stabil.
-- Model Florence-2 tidak dijalankan langsung di bot. Bot memanggil endpoint model eksternal supaya memory tetap aman.
+- Model Florence-2 tidak dijalankan langsung di memori bot agar stabil. Bot memanggil endpoint dari Inference Huggingface.
+- Pooling dipakai melalui `psycopg_pool` agar koneksi ke Supabase stabil.
