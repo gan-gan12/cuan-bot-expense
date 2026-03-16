@@ -1,10 +1,10 @@
-# CuanBot Telegram on Vercel
+# CuanBot Telegram (Serverless / Containers)
 
 CuanBot adalah chatbot Telegram untuk mencatat pengeluaran, budgeting, split bill, scan struk dengan Florence-2, dan mengirim grafik pengeluaran bulanan sebagai file gambar.
 
 ## Arsitektur Baru
 - Runtime: FastAPI + webhook Telegram.
-- Deployment: Vercel Serverless Function.
+- Deployment: Back4App Containers (Docker) atau Vercel Serverless Function.
 - Database: PostgreSQL dengan `psycopg_pool`.
 - OCR struk: Florence-2 (`microsoft/Florence-2-base`) melalui endpoint Hugging Face eksternal.
 - Chart: QuickChart API.
@@ -15,6 +15,7 @@ CuanBot adalah chatbot Telegram untuk mencatat pengeluaran, budgeting, split bil
 |-- app.py
 |-- main.py
 |-- telegram_bot.py
+|-- Dockerfile
 |-- vercel.json
 |-- requirements.txt
 |-- .env.example
@@ -30,7 +31,7 @@ CuanBot adalah chatbot Telegram untuk mencatat pengeluaran, budgeting, split bil
 ```
 
 ## Environment Variables
-Isi `.env` lokal atau Vercel Project Settings dengan:
+Isi `.env` lokal, Back4App Environment Variables, atau Vercel Settings dengan:
 
 ```env
 DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require
@@ -38,7 +39,7 @@ BOT_TIMEZONE=Asia/Jakarta
 TELEGRAM_BOT_TOKEN=ISI_DARI_BOTFATHER
 TELEGRAM_WEBHOOK_SECRET=secret-telegram-webhook
 WEBHOOK_SETUP_SECRET=secret-untuk-setup-webhook
-PUBLIC_BASE_URL=https://nama-project.vercel.app
+PUBLIC_BASE_URL=https://nama-project.b4a.run
 FLORENCE_ENDPOINT_URL=https://endpoint-anda.huggingface.cloud
 HUGGINGFACE_API_TOKEN=hf_xxx
 FLORENCE_MODEL_ID=microsoft/Florence-2-base
@@ -109,7 +110,7 @@ curl -X POST https://nama-project.vercel.app/telegram/setup-webhook ^
 Webhook akan diarahkan ke:
 
 ```text
-https://nama-project.vercel.app/telegram/webhook
+https://nama-project.b4a.run/telegram/webhook
 ```
 
 Jika `TELEGRAM_WEBHOOK_SECRET` terisi, Telegram harus mengirim header `X-Telegram-Bot-Api-Secret-Token` yang cocok.
@@ -177,16 +178,25 @@ Contoh format `DATABASE_URL` yang benar:
 postgresql://postgres.namaproject:PasswordRahasia123@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?sslmode=require
 ```
 
-Gunakan URL tersebut untuk dipasang di `.env` lokal atau di Environment Variables Vercel.
+Gunakan URL tersebut untuk dipasang di `.env` lokal atau di Environment Variables konfigurasi server.
 
-## Deploy ke Vercel
-1. Push repo ke GitHub.
-2. Import project ke Vercel.
-3. Tambahkan semua environment variables di Project Settings.
-4. Deploy.
-5. Panggil endpoint setup webhook.
+## Deploy ke Back4App Containers
+Back4App menyediakan gratis 1 Container yang dapat berjalan 24/7.
+1. Push repo ke GitHub (pastikan `Dockerfile` sudah ikut ter-push).
+2. Buat App baru di Back4App pilih jenis **Containers**.
+3. Hubungkan akun GitHub Anda dan pilih repository `cuan-bot-expense`.
+4. Isi **Environment Variables** di layar konfigurasi Back4App sesuai yang ada di `.env`. **Ingat untuk mengisi `PUBLIC_BASE_URL` dengan URL `b4a.run` Anda.** (Anda bisa set sementara `https://dummy.b4a.run`, deploy, lalu setelah dapat URL aslinya kemari dan update variabelnya).
+5. Klik **Deploy**.
+6. Ambil URL akhir web Anda (misal `https://namaproject-random.b4a.run`) dan pastikan `PUBLIC_BASE_URL` di Environment Variables sudah sesuai URL tersebut. Restart/Redeploy container jika Anda mengubah variabelnya.
+7. Panggil endpoint setup webhook dari terminal Anda:
+
+```bash
+curl -X POST https://namaproject-random.b4a.run/telegram/setup-webhook ^
+  -H "X-Setup-Secret: WEBHOOK_SETUP_SECRET_ANDA"
+```
 
 ## Catatan Infrastruktur
-- Vercel serverless tidak cocok untuk SQLite persisten, jadi database dipindah ke Postgres.
-- Pooling dipakai melalui `psycopg_pool` agar koneksi lebih stabil di serverless.
-- Model Florence-2 tidak dijalankan langsung di Vercel. Bot di Vercel memanggil endpoint model eksternal supaya cold start dan memory tetap aman.
+- Back4App Containers akan menjalankan bot melalui image Docker (sudah diatur di `Dockerfile`).
+- Vercel serverless tidak cocok untuk SQLite persisten, jadi database dipindah ke Postgres (Supabase).
+- Pooling dipakai melalui `psycopg_pool` agar koneksi lebih stabil.
+- Model Florence-2 tidak dijalankan langsung di bot. Bot memanggil endpoint model eksternal supaya memory tetap aman.
