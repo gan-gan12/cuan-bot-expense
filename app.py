@@ -14,6 +14,9 @@ from expense_bot.ocr import ReceiptOCR
 from expense_bot.service import ExpenseService
 from expense_bot.telegram_app import create_telegram_application
 
+import os
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
