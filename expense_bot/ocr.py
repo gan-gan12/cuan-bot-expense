@@ -442,53 +442,175 @@ def extract_receipt_data(ocr_input: str | Sequence[str]) -> OCRResult:
     )
 
 
+# ---------------------------------------------------------------------------
+# OCR_BACKEND options:
+#   "moondream"  – vikhyatk/moondream2 via HF Serverless (free, recommended)
+#   "gemini"     – Google Gemini Flash Vision API (free 15 RPM tier)
+#   "hf_custom"  – Custom HF Dedicated Endpoint (your own endpoint URL)
+# ---------------------------------------------------------------------------
+
+_HF_SERVERLESS_BASE = "https://api-inference.huggingface.co/models"
+_MOONDREAM_MODEL = "vikhyatk/moondream2"
+_MOONDREAM_OCR_QUESTION = (
+    "Please transcribe ALL text visible in this receipt or transaction proof image. "
+    "Include every line, number, and label exactly as it appears. "
+    "Output only the raw text, no commentary."
+)
+
+
 class ReceiptOCR:
-    def __init__(self, endpoint_url: str, api_token: str, model_id: str) -> None:
-        self.endpoint_url = endpoint_url.strip()
+    """Multi-backend receipt OCR.
+
+    Backend selection (``ocr_backend`` parameter / ``OCR_BACKEND`` env var):
+    - ``moondream`` – vikhyatk/moondream2 via HF Serverless API (free, default)
+    - ``gemini``    – Google Gemini Flash Vision API (free 15 RPM)
+    - ``hf_custom`` – Custom/Dedicated HF Inference Endpoint
+    """
+
+    def __init__(
+        self,
+        api_token: str,
+        ocr_backend: str = "moondream",
+        # legacy / hf_custom options
+        endpoint_url: str = "",
+        model_id: str = "",
+        # gemini
+        gemini_api_key: str = "",
+    ) -> None:
         self.api_token = api_token.strip()
-        self.model_id = model_id.strip() or "microsoft/Florence-2-base"
+        self.ocr_backend = ocr_backend.strip().lower() or "moondream"
+        self.endpoint_url = endpoint_url.strip()
+        self.model_id = model_id.strip()
+        self.gemini_api_key = gemini_api_key.strip()
 
     @property
     def enabled(self) -> bool:
-        return bool(self.endpoint_url)
+        if self.ocr_backend == "moondream":
+            return bool(self.api_token)
+        if self.ocr_backend == "gemini":
+            return bool(self.gemini_api_key)
+        if self.ocr_backend == "hf_custom":
+            return bool(self.endpoint_url)
+        return False
 
     async def scan_receipt(self, image_bytes: bytes) -> Optional[OCRResult]:
         if not self.enabled:
             return None
 
-        raw_text = await self._extract_text_with_florence(image_bytes)
+        try:
+            raw_text = await self._extract_text(image_bytes)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"OCR backend '{self.ocr_backend}' gagal: {exc}") from exc
+
         if not raw_text:
             return None
         return extract_receipt_data(raw_text)
 
-    async def _extract_text_with_florence(self, image_bytes: bytes) -> str:
-        headers = {"Content-Type": "application/json"}
+    async def _extract_text(self, image_bytes: bytes) -> str:
+        if self.ocr_backend == "moondream":
+            return await self._extract_moondream(image_bytes)
+        if self.ocr_backend == "gemini":
+            return await self._extract_gemini(image_bytes)
+        if self.ocr_backend == "hf_custom":
+            return await self._extract_hf_custom(image_bytes)
+        raise ValueError(f"OCR backend tidak dikenal: '{self.ocr_backend}'")
+
+    # ------------------------------------------------------------------
+    # Backend 1: Moondream2 via HF Serverless (FREE, recommended)
+    # Model: vikhyatk/moondream2
+    # HF Serverless format: multipart/form-data image OR data:{mime};base64
+    # ------------------------------------------------------------------
+    async def _extract_moondream(self, image_bytes: bytes) -> str:
+        url = f"{_HF_SERVERLESS_BASE}/{_MOONDREAM_MODEL}"
+        headers = {
+            "Authorization": f"Bearer {self.api_token}",
+            "Content-Type": "application/json",
+            "x-wait-for-model": "true",
+        }
+        b64 = base64.b64encode(image_bytes).decode("utf-8")
+        payload = {
+            "inputs": {
+                "image": f"data:image/jpeg;base64,{b64}",
+                "question": _MOONDREAM_OCR_QUESTION,
+            },
+            "parameters": {"max_new_tokens": 1024},
+        }
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+        return self._parse_hf_response(data)
+
+    # ------------------------------------------------------------------
+    # Backend 2: Google Gemini Flash Vision (FREE 15 RPM)
+    # Set env: GEMINI_API_KEY=your_key, OCR_BACKEND=gemini
+    # ------------------------------------------------------------------
+    async def _extract_gemini(self, image_bytes: bytes) -> str:
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"gemini-1.5-flash:generateContent?key={self.gemini_api_key}"
+        )
+        b64 = base64.b64encode(image_bytes).decode("utf-8")
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "inline_data": {
+                                "mime_type": "image/jpeg",
+                                "data": b64,
+                            }
+                        },
+                        {
+                            "text": (
+                                "Ini adalah gambar struk belanja atau bukti transaksi. "
+                                "Tolong salin SEMUA teks yang terlihat persis seperti aslinya, "
+                                "baris per baris. Jangan tambahkan komentar, hanya teks saja."
+                            )
+                        },
+                    ]
+                }
+            ],
+            "generationConfig": {"maxOutputTokens": 1024, "temperature": 0},
+        }
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(url, json=payload)
+            response.raise_for_status()
+            data = response.json()
+        try:
+            return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        except (KeyError, IndexError, TypeError):
+            return ""
+
+    # ------------------------------------------------------------------
+    # Backend 3: Custom / Dedicated HF Inference Endpoint
+    # For paid HF Endpoints or self-hosted models
+    # ------------------------------------------------------------------
+    async def _extract_hf_custom(self, image_bytes: bytes) -> str:
+        headers: dict[str, str] = {"Content-Type": "application/json"}
         if self.api_token:
             headers["Authorization"] = f"Bearer {self.api_token}"
-
-        payload = {
-            "model": self.model_id,
-            "task_prompt": "<OCR>",
-            "image_base64": base64.b64encode(image_bytes).decode("utf-8"),
+        b64 = base64.b64encode(image_bytes).decode("utf-8")
+        payload: dict[str, Any] = {
+            "inputs": f"data:image/jpeg;base64,{b64}",
+            "parameters": {"max_new_tokens": 1024},
         }
-
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=90.0) as client:
             response = await client.post(self.endpoint_url, json=payload, headers=headers)
             response.raise_for_status()
-            response_payload = response.json()
+            data = response.json()
+        return self._parse_hf_response(data)
 
-        text = self._extract_text_from_response(response_payload)
-        if not text:
-            raise RuntimeError("Florence endpoint tidak mengembalikan teks OCR.")
-        return text
-
-    def _extract_text_from_response(self, payload: Any) -> str:
+    # ------------------------------------------------------------------
+    # Shared response parser for HF-style outputs
+    # ------------------------------------------------------------------
+    def _parse_hf_response(self, payload: Any) -> str:
         if isinstance(payload, str):
             return payload.strip()
 
         if isinstance(payload, list):
             for item in payload:
-                text = self._extract_text_from_response(item)
+                text = self._parse_hf_response(item)
                 if text:
                     return text
             return ""
@@ -496,17 +618,18 @@ class ReceiptOCR:
         if not isinstance(payload, dict):
             return ""
 
-        if payload.get("error"):
-            raise RuntimeError(str(payload["error"]))
+        error = payload.get("error")
+        if error:
+            raise RuntimeError(str(error))
 
-        for key in ("generated_text", "text", "ocr_text"):
+        for key in ("generated_text", "answer", "text", "ocr_text"):
             value = payload.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()
 
         for nested_key in ("result", "output", "data"):
             if nested_key in payload:
-                text = self._extract_text_from_response(payload[nested_key])
+                text = self._parse_hf_response(payload[nested_key])
                 if text:
                     return text
 

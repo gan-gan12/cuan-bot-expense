@@ -34,9 +34,11 @@ def _build_runtime(settings: Settings) -> dict[str, object]:
 
     service = ExpenseService(db=db, timezone_name=settings.bot_timezone)
     receipt_ocr = ReceiptOCR(
-        endpoint_url=settings.florence_endpoint_url,
         api_token=settings.huggingface_api_token,
+        ocr_backend=settings.ocr_backend,
+        endpoint_url=settings.florence_endpoint_url,
         model_id=settings.florence_model_id,
+        gemini_api_key=settings.gemini_api_key,
     )
     chart_service = ExpenseChartService(
         db=db,
@@ -92,7 +94,8 @@ async def root(request: Request) -> dict[str, object]:
         "ok": True,
         "service": "cuanbot-webhook",
         "webhook_url": settings.webhook_url,
-        "florence_enabled": bool(settings.florence_endpoint_url),
+        "ocr_backend": settings.ocr_backend,
+        "ocr_enabled": True,
     }
 
 

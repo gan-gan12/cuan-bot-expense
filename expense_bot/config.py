@@ -18,9 +18,14 @@ class Settings:
     telegram_webhook_secret: str
     webhook_setup_secret: str
     public_base_url: str
-    florence_endpoint_url: str
+    # OCR settings
+    ocr_backend: str          # "moondream" | "gemini" | "hf_custom"
     huggingface_api_token: str
+    gemini_api_key: str
+    # Legacy / hf_custom backend
+    florence_endpoint_url: str
     florence_model_id: str
+    # Misc
     quickchart_url: str
     port: int
     allowed_telegram_users: list[int]
@@ -53,9 +58,11 @@ def get_settings() -> Settings:
         telegram_webhook_secret=os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip(),
         webhook_setup_secret=os.getenv("WEBHOOK_SETUP_SECRET", "").strip(),
         public_base_url=os.getenv("PUBLIC_BASE_URL", "").strip(),
-        florence_endpoint_url=os.getenv("FLORENCE_ENDPOINT_URL", "").strip(),
+        ocr_backend=os.getenv("OCR_BACKEND", "moondream").strip(),
         huggingface_api_token=os.getenv("HUGGINGFACE_API_TOKEN", "").strip(),
-        florence_model_id=os.getenv("FLORENCE_MODEL_ID", "microsoft/Florence-2-base").strip(),
+        gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
+        florence_endpoint_url=os.getenv("FLORENCE_ENDPOINT_URL", "").strip(),
+        florence_model_id=os.getenv("FLORENCE_MODEL_ID", "").strip(),
         quickchart_url=os.getenv("QUICKCHART_URL", "https://quickchart.io/chart").strip(),
         port=int(os.getenv("PORT", "8000")),
         allowed_telegram_users=_parse_allowed_users(os.getenv("ALLOWED_TELEGRAM_USERS", "")),
