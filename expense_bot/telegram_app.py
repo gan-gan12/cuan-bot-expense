@@ -109,9 +109,10 @@ def create_telegram_application(
 
         if not receipt_ocr.enabled:
             await update.message.reply_text(
-                "Fitur scan struk belum aktif. Isi `FLORENCE_ENDPOINT_URL` dulu ya."
+                "Fitur scan struk belum aktif. Hubungi admin untuk mengaktifkan OCR ya."
             )
             return
+
 
         largest_photo = update.message.photo[-1]
         tg_file = await largest_photo.get_file()

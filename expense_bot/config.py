@@ -19,7 +19,9 @@ class Settings:
     webhook_setup_secret: str
     public_base_url: str
     # OCR settings
-    ocr_backend: str          # "moondream" | "gemini" | "hf_custom"
+    ocr_backend: str           # "moondream" | "gemini" | "custom_url" | "hf_custom"
+    ocr_backend_url: str       # URL backend OCR sendiri (untuk custom_url)
+    custom_payload_mode: str   # "json_base64" | "multipart"
     huggingface_api_token: str
     gemini_api_key: str
     # Legacy / hf_custom backend
@@ -59,6 +61,8 @@ def get_settings() -> Settings:
         webhook_setup_secret=os.getenv("WEBHOOK_SETUP_SECRET", "").strip(),
         public_base_url=os.getenv("PUBLIC_BASE_URL", "").strip(),
         ocr_backend=os.getenv("OCR_BACKEND", "moondream").strip(),
+        ocr_backend_url=os.getenv("OCR_BACKEND_URL", "").strip(),
+        custom_payload_mode=os.getenv("OCR_BACKEND_PAYLOAD", "json_base64").strip(),
         huggingface_api_token=os.getenv("HUGGINGFACE_API_TOKEN", "").strip(),
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
         florence_endpoint_url=os.getenv("FLORENCE_ENDPOINT_URL", "").strip(),

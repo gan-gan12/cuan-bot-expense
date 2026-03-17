@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -9,6 +10,9 @@ from typing import Any, Iterable, Optional, Sequence
 import httpx
 
 from .parser import format_date_id, format_idr, infer_category, parse_amount_token, parse_date_input
+
+
+logger = logging.getLogger(__name__)
 
 
 DATE_RE = re.compile(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b")
@@ -444,9 +448,10 @@ def extract_receipt_data(ocr_input: str | Sequence[str]) -> OCRResult:
 
 # ---------------------------------------------------------------------------
 # OCR_BACKEND options:
-#   "moondream"  – vikhyatk/moondream2 via HF Serverless (free, recommended)
-#   "gemini"     – Google Gemini Flash Vision API (free 15 RPM tier)
-#   "hf_custom"  – Custom HF Dedicated Endpoint (your own endpoint URL)
+#   "moondream"   – vikhyatk/moondream2 via HF Serverless (free, recommended)
+#   "gemini"      – Google Gemini Flash Vision API (free 15 RPM tier)
+#   "hf_custom"   – Custom HF Dedicated Endpoint (paid HF endpoint)
+#   "custom_url"  – Backend OCR milik sendiri (set OCR_BACKEND_URL)
 # ---------------------------------------------------------------------------
 
 _HF_SERVERLESS_BASE = "https://api-inference.huggingface.co/models"
@@ -462,15 +467,20 @@ class ReceiptOCR:
     """Multi-backend receipt OCR.
 
     Backend selection (``ocr_backend`` parameter / ``OCR_BACKEND`` env var):
-    - ``moondream`` – vikhyatk/moondream2 via HF Serverless API (free, default)
-    - ``gemini``    – Google Gemini Flash Vision API (free 15 RPM)
-    - ``hf_custom`` – Custom/Dedicated HF Inference Endpoint
+    - ``moondream``  – vikhyatk/moondream2 via HF Serverless API (free, default)
+    - ``gemini``     – Google Gemini Flash Vision API (free 15 RPM)
+    - ``hf_custom``  – HF Dedicated Inference Endpoint (paid)
+    - ``custom_url`` – Backend OCR milik sendiri, kirim via ``OCR_BACKEND_URL``
     """
 
     def __init__(
         self,
         api_token: str,
         ocr_backend: str = "moondream",
+        # custom_url backend
+        ocr_backend_url: str = "",
+        # Payload mode untuk custom_url: "json_base64" (default) atau "multipart"
+        custom_payload_mode: str = "json_base64",
         # legacy / hf_custom options
         endpoint_url: str = "",
         model_id: str = "",
@@ -479,6 +489,8 @@ class ReceiptOCR:
     ) -> None:
         self.api_token = api_token.strip()
         self.ocr_backend = ocr_backend.strip().lower() or "moondream"
+        self.ocr_backend_url = ocr_backend_url.strip()
+        self.custom_payload_mode = custom_payload_mode.strip().lower() or "json_base64"
         self.endpoint_url = endpoint_url.strip()
         self.model_id = model_id.strip()
         self.gemini_api_key = gemini_api_key.strip()
@@ -491,19 +503,31 @@ class ReceiptOCR:
             return bool(self.gemini_api_key)
         if self.ocr_backend == "hf_custom":
             return bool(self.endpoint_url)
+        if self.ocr_backend == "custom_url":
+            return bool(self.ocr_backend_url)
         return False
 
     async def scan_receipt(self, image_bytes: bytes) -> Optional[OCRResult]:
         if not self.enabled:
+            logger.warning(
+                "[OCR] Backend '%s' belum dikonfigurasi (enabled=False). "
+                "Pastikan env var yang diperlukan sudah diisi.",
+                self.ocr_backend,
+            )
             return None
 
+        logger.info("[OCR] Memulai ekstraksi teks, backend='%s', size=%d bytes", self.ocr_backend, len(image_bytes))
         try:
             raw_text = await self._extract_text(image_bytes)
         except Exception as exc:  # noqa: BLE001
+            logger.error("[OCR] Backend '%s' gagal: %s", self.ocr_backend, exc, exc_info=True)
             raise RuntimeError(f"OCR backend '{self.ocr_backend}' gagal: {exc}") from exc
 
         if not raw_text:
+            logger.warning("[OCR] Backend '%s' tidak mengembalikan teks (kosong).", self.ocr_backend)
             return None
+
+        logger.info("[OCR] Teks berhasil diekstrak (%d karakter). Memproses data struk...", len(raw_text))
         return extract_receipt_data(raw_text)
 
     async def _extract_text(self, image_bytes: bytes) -> str:
@@ -513,6 +537,8 @@ class ReceiptOCR:
             return await self._extract_gemini(image_bytes)
         if self.ocr_backend == "hf_custom":
             return await self._extract_hf_custom(image_bytes)
+        if self.ocr_backend == "custom_url":
+            return await self._extract_custom_url(image_bytes)
         raise ValueError(f"OCR backend tidak dikenal: '{self.ocr_backend}'")
 
     # ------------------------------------------------------------------
@@ -595,10 +621,68 @@ class ReceiptOCR:
             "inputs": f"data:image/jpeg;base64,{b64}",
             "parameters": {"max_new_tokens": 1024},
         }
+        logger.info("[OCR/hf_custom] POST ke %s", self.endpoint_url)
         async with httpx.AsyncClient(timeout=90.0) as client:
             response = await client.post(self.endpoint_url, json=payload, headers=headers)
+            logger.info("[OCR/hf_custom] HTTP %s", response.status_code)
             response.raise_for_status()
             data = response.json()
+        return self._parse_hf_response(data)
+
+    # ------------------------------------------------------------------
+    # Backend 4: Custom URL (backend OCR milik sendiri)
+    # Set env: OCR_BACKEND_URL=https://...
+    #          OCR_BACKEND_PAYLOAD=json_base64  (default) | multipart
+    #
+    # Mode json_base64  → POST JSON: {"image": "<base64>", "filename": "receipt.jpg"}
+    #   Respons yang didukung: string, {"text":"..."}, {"result":"..."}, dll.
+    #
+    # Mode multipart    → POST multipart/form-data dengan field "file"
+    #   Respons yang didukung: sama seperti di atas.
+    # ------------------------------------------------------------------
+    async def _extract_custom_url(self, image_bytes: bytes) -> str:
+        logger.info(
+            "[OCR/custom_url] POST ke %s (payload_mode=%s, size=%d bytes)",
+            self.ocr_backend_url,
+            self.custom_payload_mode,
+            len(image_bytes),
+        )
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            if self.custom_payload_mode == "multipart":
+                response = await client.post(
+                    self.ocr_backend_url,
+                    files={"file": ("receipt.jpg", image_bytes, "image/jpeg")},
+                )
+            else:  # default: json_base64
+                b64 = base64.b64encode(image_bytes).decode("utf-8")
+                response = await client.post(
+                    self.ocr_backend_url,
+                    json={"image": b64, "filename": "receipt.jpg"},
+                    headers={"Content-Type": "application/json"},
+                )
+
+        logger.info(
+            "[OCR/custom_url] HTTP %s | response preview: %.200s",
+            response.status_code,
+            response.text,
+        )
+
+        if response.status_code >= 400:
+            logger.error(
+                "[OCR/custom_url] Error HTTP %s: %s",
+                response.status_code,
+                response.text[:500],
+            )
+            response.raise_for_status()
+
+        # Coba parse JSON, fallback ke plain text
+        try:
+            data = response.json()
+        except Exception:  # noqa: BLE001
+            raw = response.text.strip()
+            logger.info("[OCR/custom_url] Respons bukan JSON, gunakan plain text (%d chars).", len(raw))
+            return raw
+
         return self._parse_hf_response(data)
 
     # ------------------------------------------------------------------
