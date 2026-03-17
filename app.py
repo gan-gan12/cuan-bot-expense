@@ -90,14 +90,28 @@ app = FastAPI(title="CuanBot Webhook", version="2.0.0", lifespan=lifespan)
 @app.get("/")
 async def root(request: Request) -> dict[str, object]:
     settings = request.app.state.settings
+    ocr: ReceiptOCR = request.app.state.receipt_ocr
     return {
         "ok": True,
         "service": "cuanbot-webhook",
         "webhook_url": settings.webhook_url,
         "ocr_backend": settings.ocr_backend,
-        "ocr_enabled": True,
+        "ocr_enabled": ocr.enabled,
     }
 
+
+@app.get("/ocr-status")
+async def ocr_status(request: Request) -> dict[str, object]:
+    """Diagnostic endpoint — shows OCR runtime config. Safe to call publicly."""
+    settings = request.app.state.settings
+    ocr: ReceiptOCR = request.app.state.receipt_ocr
+    return {
+        "ocr_backend": settings.ocr_backend,
+        "ocr_enabled": ocr.enabled,
+        "has_huggingface_token": bool(settings.huggingface_api_token),
+        "has_gemini_key": bool(settings.gemini_api_key),
+        "has_florence_url": bool(settings.florence_endpoint_url),
+    }
 
 @app.get("/health")
 async def health(request: Request) -> dict[str, object]:
