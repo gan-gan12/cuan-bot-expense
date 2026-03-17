@@ -36,8 +36,6 @@ def _build_runtime(settings: Settings) -> dict[str, object]:
     receipt_ocr = ReceiptOCR(
         api_token=settings.huggingface_api_token,
         ocr_backend=settings.ocr_backend,
-        ocr_backend_url=settings.ocr_backend_url,
-        custom_payload_mode=settings.custom_payload_mode,
         endpoint_url=settings.florence_endpoint_url,
         model_id=settings.florence_model_id,
         gemini_api_key=settings.gemini_api_key,

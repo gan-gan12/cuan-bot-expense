@@ -107,32 +107,84 @@ def create_telegram_application(
         if not update.message or not update.message.photo:
             return
 
+        user_id = update.effective_user.id if update.effective_user else "unknown"
+        chat_id = update.message.chat_id
+
+        # ------------------------------------------------------------------
+        # Guard: OCR backend not configured / credentials missing
+        # ------------------------------------------------------------------
         if not receipt_ocr.enabled:
+            logger.warning(
+                "[photo_handler] OCR backend '%s' tidak aktif untuk user %s — "
+                "pastikan variabel ENV sudah diisi (HUGGINGFACE_API_TOKEN / GEMINI_API_KEY)",
+                receipt_ocr.ocr_backend,
+                user_id,
+            )
             await update.message.reply_text(
-                "Fitur scan struk belum aktif. Hubungi admin untuk mengaktifkan OCR ya."
+                "Fitur scan struk belum aktif.\n"
+                "Hubungi admin untuk mengaktifkan OCR ya. 🙏"
             )
             return
 
+        # Show typing indicator while we process
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
+        # ------------------------------------------------------------------
+        # Download image from Telegram
+        # ------------------------------------------------------------------
         largest_photo = update.message.photo[-1]
-        tg_file = await largest_photo.get_file()
-        buffer = BytesIO()
-        await tg_file.download_to_memory(out=buffer)
-
         try:
-            result = await receipt_ocr.scan_receipt(buffer.getvalue())
+            tg_file = await largest_photo.get_file()
+            buffer = BytesIO()
+            await tg_file.download_to_memory(out=buffer)
+            image_bytes = buffer.getvalue()
         except Exception:
-            logger.exception("Gagal memproses gambar struk")
+            logger.exception(
+                "[photo_handler] Gagal download file Telegram (user=%s, file_id=%s)",
+                user_id,
+                largest_photo.file_id,
+            )
             await update.message.reply_text(
-                "Maaf, scan struknya belum berhasil sekarang. Coba foto lebih terang atau kirim ulang ya."
+                "Gagal mengambil gambar dari Telegram. Coba kirim ulang ya."
+            )
+            return
+
+        # ------------------------------------------------------------------
+        # Run OCR
+        # ------------------------------------------------------------------
+        try:
+            result = await receipt_ocr.scan_receipt(image_bytes)
+        except Exception as exc:
+            logger.exception(
+                "[photo_handler] OCR backend='%s' gagal untuk user=%s | error: %s",
+                receipt_ocr.ocr_backend,
+                user_id,
+                exc,
+            )
+            await update.message.reply_text(
+                "Scan struknya belum berhasil sekarang.\n"
+                "Pastikan foto cukup terang dan teks terlihat jelas, lalu coba kirim ulang. 📸"
             )
             return
 
         if not result:
+            logger.info(
+                "[photo_handler] OCR tidak menghasilkan teks (user=%s, backend=%s)",
+                user_id,
+                receipt_ocr.ocr_backend,
+            )
             await update.message.reply_text(
-                "Aku belum bisa baca struknya sekarang. Coba kirim foto yang lebih jelas ya."
+                "Aku belum bisa baca struknya. "
+                "Coba foto lebih dekat dan pastikan teksnya tidak blur ya. 🔍"
             )
             return
+
+        logger.info(
+            "[photo_handler] OCR sukses (user=%s, backend=%s, has_receipt=%s)",
+            user_id,
+            receipt_ocr.ocr_backend,
+            bool(result.receipt),
+        )
 
         if result.needs_manual_total_confirmation or not result.receipt:
             await update.message.reply_text(result.reply_text)
