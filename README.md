@@ -1,10 +1,10 @@
-# CuanBot Telegram (Serverless / Containers)
+# CuanBot Telegram on Vercel
 
 CuanBot adalah chatbot Telegram untuk mencatat pengeluaran, budgeting, split bill, scan struk dengan Florence-2, dan mengirim grafik pengeluaran bulanan sebagai file gambar.
 
 ## Arsitektur Baru
 - Runtime: FastAPI + webhook Telegram.
-- Deployment: Hugging Face Spaces (Docker) atau Vercel Serverless Function.
+- Deployment: Vercel Serverless Function.
 - Database: PostgreSQL dengan `psycopg_pool`.
 - OCR struk: Florence-2 (`microsoft/Florence-2-base`) melalui endpoint Hugging Face eksternal.
 - Chart: QuickChart API.
@@ -15,7 +15,6 @@ CuanBot adalah chatbot Telegram untuk mencatat pengeluaran, budgeting, split bil
 |-- app.py
 |-- main.py
 |-- telegram_bot.py
-|-- Dockerfile
 |-- vercel.json
 |-- requirements.txt
 |-- .env.example
@@ -31,7 +30,7 @@ CuanBot adalah chatbot Telegram untuk mencatat pengeluaran, budgeting, split bil
 ```
 
 ## Environment Variables
-Isi `.env` lokal, Hugging Face Spaces Secrets, atau Vercel Settings dengan:
+Isi `.env` lokal atau Vercel Project Settings dengan:
 
 ```env
 DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require
@@ -39,7 +38,7 @@ BOT_TIMEZONE=Asia/Jakarta
 TELEGRAM_BOT_TOKEN=ISI_DARI_BOTFATHER
 TELEGRAM_WEBHOOK_SECRET=secret-telegram-webhook
 WEBHOOK_SETUP_SECRET=secret-untuk-setup-webhook
-PUBLIC_BASE_URL=https://huggingface.co/spaces/username/namaspace
+PUBLIC_BASE_URL=https://nama-project.vercel.app
 FLORENCE_ENDPOINT_URL=https://endpoint-anda.huggingface.cloud
 HUGGINGFACE_API_TOKEN=hf_xxx
 FLORENCE_MODEL_ID=microsoft/Florence-2-base
@@ -110,7 +109,7 @@ curl -X POST https://nama-project.vercel.app/telegram/setup-webhook ^
 Webhook akan diarahkan ke:
 
 ```text
-https://huggingface.co/spaces/username/namaspace/telegram/webhook
+https://nama-project.vercel.app/telegram/webhook
 ```
 
 Jika `TELEGRAM_WEBHOOK_SECRET` terisi, Telegram harus mengirim header `X-Telegram-Bot-Api-Secret-Token` yang cocok.
@@ -178,28 +177,22 @@ Contoh format `DATABASE_URL` yang benar:
 postgresql://postgres.namaproject:PasswordRahasia123@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?sslmode=require
 ```
 
-Gunakan URL tersebut untuk dipasang di `.env` lokal atau di Environment Variables konfigurasi server.
+Gunakan URL tersebut untuk dipasang di `.env` lokal atau di Environment Variables Vercel.
 
-## Deploy ke Hugging Face Spaces (Docker)
-
-> [!WARNING]  
-> **LIMITASI FREE TIER**: Hugging Face Spaces versi *Free Tier* (Hardware: CPU Basic - Free) **MEMBLOKIR** koneksi *outbound* internet ke luar, termasuk koneksi ke `api.telegram.org` dan database Eksternal Supabase. Inilah penyebab munculnya error `[Errno -5] No address associated with hostname`. 
-> 
-> Agar bot dapat membalas pesan ke Telegram dan menghubungi Supabase, Anda **WAJIB** meningkatkan/upgrade spesifikasi *Hardware* Space Anda minimal ke spesifikasi berbayar terendah (misal: CPU Upgrade). Hal ini otomatis akan membuka akses internet *outbound*.
-
-1. Buat Space baru di Hugging Face, pilih SDK **Docker** (Blank).
-2. Push repository ini (termasuk `Dockerfile`) ke repositori Hugging Face yang baru Anda buat, atau gunakan GitHub Actions `sync_to_huggingface.yml`.
-3. Buka tab **Settings** di Halaman Space Anda.
-4. Di bagian **Variables and secrets**, tekan **New secret** lalu masukkan semua *Environment Variables* di atas satu per satu (seperti `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, dsb).
-5. Pada rahasia `PUBLIC_BASE_URL`, isi URL publik app Anda (misal `https://namasamaran-cuanbot.hf.space` -  Anda dapat melihat public url ini dengan mengeklik *Embed this Space* di kanan atas (Pilih Direct URL)).
-6. Hugging Face akan membangun ulang kontainernya secara otomatis.
-7. Panggil endpoint setup webhook dari terminal Anda:
+## Deploy ke Vercel
+1. Push repo ke GitHub.
+2. Buka dashboard Vercel, klik **Add New...** > **Project**.
+3. Hubungkan akun GitHub dan pilih repositori `cuan-bot-expense`.
+4. Di bagian **Environment Variables**, tambahkan semua string di atas (terutama `PUBLIC_BASE_URL` yang diakhiri `.vercel.app`).
+5. Klik **Deploy**.
+6. Panggil endpoint setup webhook dari terminal komputer Anda:
 
 ```bash
-curl -X POST https://namasamaran-cuanbot.hf.space/telegram/setup-webhook ^
+curl -X POST https://nama-proyek.vercel.app/telegram/setup-webhook ^
   -H "X-Setup-Secret: WEBHOOK_SETUP_SECRET_ANDA"
 ```
 
 ## Catatan Infrastruktur
-- Model Florence-2 tidak dijalankan langsung di memori bot agar stabil. Bot memanggil endpoint dari Inference Huggingface.
+- Vercel serverless tidak cocok untuk SQLite persisten, jadi database dipindah ke Postgres (Supabase).
 - Pooling dipakai melalui `psycopg_pool` agar koneksi ke Supabase stabil.
+- Model Florence-2 tidak dijalankan langsung di memori bot agar stabil. Bot (Vercel) hanya memanggil endpoint Inference dari Hugging Face untuk proses OCR.
